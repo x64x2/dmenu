@@ -178,15 +178,7 @@ make -j$(nproc)
 ## Donations
 **Monero (XMR):**
 ```
-83QbQvnnyo7515rEnW8XwF1hbP5qMab6sHXFzP6pg3EKGscgXCbVjbt1FX5SF7AV9p4Ur1tiommuQSzrQQRHkZicVYu6j8Y
-```
-<p align="center">
-    <a href="monero:83QbQvnnyo7515rEnW8XwF1hbP5qMab6sHXFzP6pg3EKGscgXCbVjbt1FX5SF7AV9p4Ur1tiommuQSzrQQRHkZicVYu6j8Y" target="_blank"><img src="assets/images/donate_xmr.png" width="128" height="128"></img></a>
-</p>
-
-**Wownero (WOW):**
-```
-WW2pQTQWHpyJf2CHrCmZG7Tn3zBnYRZTH8g4U3pSZf5s6xsTXrZc9odDWmrWzjRc9MMQWrKXxjHsRdzH5JpJ7kzx1jZuSVSfi
+49FCj7XzyRVR3i7dwyqF6WabujydDBy1o957KHFgNbC7XsM4Kd7Duj8fxVCYeP7iU29hrG1pADh9eJusSAwWqwf9Jzpjt9S
 ```
 
 ## Resources
