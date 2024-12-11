@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=neroshop
+GenericName=Monero Marketplace
+Comment=Decentralized P2P marketplace for Monero users
+Exec=neroshop %u
+Icon=neroshop
+Terminal=false
+MimeType=x-scheme-handler/neroshop;
+Categories=Network;Office;Utility;
+StartupNotify=false
+StartupWMClass=neroshop
