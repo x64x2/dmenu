@@ -1,0 +1,648 @@
+cmake_minimum_required(VERSION 3.5)
+project(LAIINshop) # tested on Ubuntu 20.04 LTS (focal) with gcc (Ubuntu 9.3.0-17ubuntu1~20.04) 9.3.0
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(VERSION_MAJOR "0")
+set(VERSION_MINOR "1")
+set(VERSION_PATCH "0")
+set(PROJECT_VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
+
+option(LAIINSHOP_BUILD_TESTS "Build LAIINshop tests" OFF)
+option(LAIINSHOP_BUILD_CLI "Build LAIINshop CLI" OFF) # CLI is for testing only. This is a GUI-based ecommerce app so BUILD_CLI will be off by default
+option(LAIINSHOP_BUILD_GUI "Build LAIINshop GUI" ON)
+include(CMakeDependentOption)
+cmake_dependent_option(LAIINSHOP_USE_QT "Build LAIINshop with Qt" ON "LAIINSHOP_BUILD_GUI" OFF)
+option(UUID_SYSTEM_GENERATOR "Enable operating system uuid generator" OFF)
+option(UUID_TIME_GENERATOR "Enable experimental time-based uuid generator" OFF)
+cmake_dependent_option(LAIINSHOP_USE_SYSTEM_SOCKETS "Build LAIINshop with system sockets" ON "NOT LAIINSHOP_USE_LIBZMQ;NOT LAIINSHOP_USE_LIBUV" OFF)
+cmake_dependent_option(LAIINSHOP_USE_LIBZMQ "Build LAIINshop with LibZMQ" ON "NOT LAIINSHOP_USE_LIBUV;NOT LAIINSHOP_USE_SYSTEM_SOCKETS" OFF)
+option(LAIINSHOP_USE_GRPC "Build LAIINshop with gRPC" OFF)
+cmake_dependent_option(LAIINSHOP_USE_SYSTEM_GRPC "Use system installed gRPC" ON "LAIINSHOP_USE_GRPC;USE_SYSTEM_GRPC" OFF)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" "${CMAKE_CURRENT_SOURCE_DIR}/external/moLAIIN-cpp/external/moLAIIN-project/cmake")
+
+set(LAIINSHOP_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set(LAIINSHOP_CONSOLE_SRC_DIR ${LAIINSHOP_SRC_DIR}/console)
+set(LAIINSHOP_CORE_SRC_DIR ${LAIINSHOP_SRC_DIR}/core)
+set(LAIINSHOP_DAEMON_SRC_DIR ${LAIINSHOP_SRC_DIR}/daemon)
+set(LAIINSHOP_GUI_SRC_DIR ${LAIINSHOP_SRC_DIR}/gui)
+
+
+if(LAIINSHOP_BUILD_GUI AND LAIINSHOP_USE_QT)
+    set(CMAKE_AUTOMOC ON)
+    #set(CMAKE_AUTORCC ON)
+    #set(CMAKE_AUTOUIC ON)
+    if(CMAKE_VERSION VERSION_LESS "3.7.0")
+        set(CMAKE_INCLUDE_CURRENT_DIR ON)
+    endif()
+    find_package(Qt5 COMPONENTS Qml Quick Gui Concurrent #[[QuickControls2]])# REQUIRED) # v5.15.x
+    # add the qml.qrc file
+    qt5_add_resources(LAIINshop_res qml.qrc)#qt_add_resources# <= introduced in Qt 5.15 and higher
+endif()
+
+
+if(NOT WIN32)
+    string(ASCII 27 Esc)
+    set(ColourReset "${Esc}[m")
+    set(ColourBold  "${Esc}[1m")
+    set(Red         "${Esc}[31m")
+    set(Green       "${Esc}[32m")
+    set(Yellow      "${Esc}[33m")
+    set(Blue        "${Esc}[34m")
+    set(Magenta     "${Esc}[35m")
+    set(Cyan        "${Esc}[36m")
+    set(White       "${Esc}[37m")
+    set(BoldRed     "${Esc}[1;91m")
+    set(BoldGreen   "${Esc}[1;32m")
+    set(BoldYellow  "${Esc}[1;33m")
+    set(BoldBlue    "${Esc}[1;34m")
+    set(BoldMagenta "${Esc}[1;35m")
+    set(BoldCyan    "${Esc}[1;36m")
+    set(BoldWhite   "${Esc}[1;37m")
+endif()
+
+
+if(WIN32)
+endif()
+
+if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+# Set compiler-specific flags
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -w")# -fsanitize=address") #-w=ignores all warnings
+    message(STATUS "Building with clang")
+else()
+    message(STATUS "Building with gcc/g++")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -no-pie")# -w")# -fsanitize=address") # -no-pie=can run outside terminal
+endif()
+endif()
+
+if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+endif()
+
+
+set(MOLAIIN_ROOT_DIR "${CMAKE_SOURCE_DIR}/external/moLAIIN-cpp/external/moLAIIN-project")
+set(MOLAIIN_SRC_DIR "${MOLAIIN_ROOT_DIR}/src")
+
+####################
+# Extra libraries
+if (APPLE)
+  if (DEPENDS)
+    list(APPEND EXTRA_LIBRARIES "-framework Foundation -framework IOKit -framework AppKit")
+  else()
+    find_library(COREFOUNDATION CoreFoundation)
+    find_library(IOKIT IOKit)
+    find_library(APPKIT AppKit)
+    list(APPEND EXTRA_LIBRARIES ${IOKIT})
+    list(APPEND EXTRA_LIBRARIES ${COREFOUNDATION})
+    list(APPEND EXTRA_LIBRARIES ${APPKIT})
+  endif()
+endif()
+if (WIN32)
+  list(APPEND EXTRA_LIBRARIES setupapi)
+endif()
+
+message(STATUS EXTRA_LIBRARIES: ${EXTRA_LIBRARIES})
+
+
+# Protobuf
+include(FindProtobuf)
+find_package(Protobuf)
+message(STATUS "Protobuf lib: ${Protobuf_LIBRARY}, inc: ${Protobuf_INCLUDE_DIR}, protoc: ${Protobuf_PROTOC_EXECUTABLE}")
+
+
+# LibUSB
+find_library(usb_LIBRARY NAMES usb-1.0 libusb usb)
+set(LibUSB_LIBRARIES ${usb_LIBRARY})
+
+
+# Boost
+set(Boost_NO_BOOST_CMAKE 1)
+set(Boost_USE_MULTITHREADED ON)
+find_package(Boost 1.58 QUIET REQUIRED COMPONENTS chrono date_time filesystem program_options regex serialization wserialization system thread)
+message(STATUS "Using Boost include dir at ${Boost_INCLUDE_DIR}")
+add_definitions(-DBOOST_DISABLE_PRAGMA_MESSAGE)
+
+
+# OpenSSL
+if (APPLE AND NOT IOS)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=default -std=c++14")
+  if (NOT OPENSSL_ROOT_DIR)
+      EXECUTE_PROCESS(COMMAND brew --prefix openssl
+        OUTPUT_VARIABLE OPENSSL_ROOT_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    message(STATUS "Using OpenSSL found at ${OPENSSL_ROOT_DIR}")
+  endif()
+endif()
+
+find_package(OpenSSL REQUIRED)
+message(STATUS "Using OpenSSL include dir at ${OPENSSL_INCLUDE_DIR}")
+add_definitions(-DOPENSSL_SUPPRESS_DEPRECATED)
+
+if(STATIC AND NOT IOS)
+  if(UNIX)
+    set(OPENSSL_LIBRARIES "${OPENSSL_LIBRARIES};${CMAKE_DL_LIBS};${CMAKE_THREAD_LIBS_INIT}")
+  endif()
+endif()
+
+
+# libsodium
+find_library(SODIUM_LIBRARY sodium REQUIRED)
+message(STATUS "Using libsodium: ${SODIUM_LIBRARY}")
+
+
+# HIDAPI
+if(APPLE)
+  include_directories(SYSTEM /usr/include/malloc)
+  if(POLICY CMP0042)
+    cmake_policy(SET CMP0042 NEW)
+  endif()
+endif()
+
+find_package(HIDAPI)
+if(HIDAPI_FOUND)
+    message(STATUS "Using HIDAPI include dir at ${HIDAPI_INCLUDE_DIR}")
+    add_definitions(-DHAVE_HIDAPI)
+    link_directories(${LIBHIDAPI_LIBRARY_DIRS})
+endif()
+if(NOT HIDAPI_FOUND)
+    message("HIDAPI libraries not found. Will manually set libraries.")
+    if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+        set(UDEV_LIBRARY libudev.so)
+        set(HIDAPI_LIBRARY ${UDEV_LIBRARY} libhidapi-libusb.so) # or libhidapi-hidraw.so # has to be dynamically linked or you'll get "undefined reference to `libusb_get_device_address'" error
+    endif()
+endif()
+
+
+# Unbound
+find_package(Unbound)
+if ("${UNBOUND_LIBRARIES}" MATCHES "libunbound")
+  message(STATUS "Using libunbound: ${UNBOUND_LIBRARIES}")
+  add_library(unbound SHARED IMPORTED)
+  set_target_properties(unbound PROPERTIES IMPORTED_LOCATION
+      ${UNBOUND_LIBRARIES})
+endif()
+
+
+# MoLAIIN
+set(MOLAIIN_BUILD_DIR "${MOLAIIN_ROOT_DIR}/build/release" CACHE STRING "MoLAIIN project build directory")
+message(STATUS "Using moLAIIN-project build: " ${MOLAIIN_BUILD_DIR})
+
+add_library(wallet STATIC IMPORTED)
+set_target_properties(wallet PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/lib/libwallet.a)
+    
+# libwallet-crypto.a provides x86_64 asm for some wallet functions
+if (EXISTS ${MOLAIIN_BUILD_DIR}/src/crypto/wallet/libwallet-crypto.a)
+  add_library(wallet_crypto_lib STATIC IMPORTED)
+  set_target_properties(wallet_crypto_lib PROPERTIES IMPORTED_LOCATION
+      ${MOLAIIN_BUILD_DIR}/src/crypto/wallet/libwallet-crypto.a)
+  set(wallet_crypto wallet_crypto_lib)
+endif()
+    
+add_library(lmdb STATIC IMPORTED)
+set_target_properties(lmdb PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/external/db_drivers/liblmdb/liblmdb.a)
+    
+add_library(epee STATIC IMPORTED)
+set_target_properties(epee PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/contrib/epee/src/libepee.a)
+    
+add_library(rpc_base STATIC IMPORTED)
+set_target_properties(rpc_base PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/rpc/librpc_base.a)
+
+add_library(net STATIC IMPORTED)
+set_target_properties(net PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/net/libnet.a)
+    
+add_library(hardforks STATIC IMPORTED)
+set_target_properties(hardforks PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/hardforks/libhardforks.a)    
+    
+add_library(easylogging STATIC IMPORTED)
+set_target_properties(easylogging PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/external/easylogging++/libeasylogging.a)
+
+add_library(cryptonote_core STATIC IMPORTED)
+set_target_properties(cryptonote_core PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/cryptonote_core/libcryptonote_core.a)
+    
+    add_library(cryptonote_protocol STATIC IMPORTED)
+set_target_properties(cryptonote_protocol PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/cryptonote_protocol/libcryptonote_protocol.a)
+
+add_library(cryptonote_basic STATIC IMPORTED)
+set_target_properties(cryptonote_basic PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/cryptonote_basic/libcryptonote_basic.a)
+
+add_library(cryptonote_format_utils_basic STATIC IMPORTED)
+set_target_properties(cryptonote_format_utils_basic PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/cryptonote_basic/libcryptonote_format_utils_basic.a)
+    
+add_library(mnemonics STATIC IMPORTED)
+set_target_properties(mnemonics PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/mnemonics/libmnemonics.a)
+
+add_library(common STATIC IMPORTED)
+set_target_properties(common PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/common/libcommon.a)
+
+add_library(cncrypto STATIC IMPORTED)
+set_target_properties(cncrypto PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/crypto/libcncrypto.a)
+
+add_library(ringct STATIC IMPORTED)
+set_target_properties(ringct PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/ringct/libringct.a)
+
+add_library(ringct_basic STATIC IMPORTED)
+set_target_properties(ringct_basic PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/ringct/libringct_basic.a)
+
+add_library(blockchain_db STATIC IMPORTED)
+set_target_properties(blockchain_db PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/blockchain_db/libblockchain_db.a)
+
+add_library(blocks STATIC IMPORTED)
+set_target_properties(blocks PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/blocks/libblocks.a)
+
+add_library(checkpoints STATIC IMPORTED)
+set_target_properties(checkpoints PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/checkpoints/libcheckpoints.a)
+
+add_library(device STATIC IMPORTED)
+set_target_properties(device PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/device/libdevice.a)
+    
+add_library(device_trezor STATIC IMPORTED)
+set_target_properties(device_trezor PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/device_trezor/libdevice_trezor.a)
+
+add_library(multisig STATIC IMPORTED)
+set_target_properties(multisig PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/multisig/libmultisig.a)
+
+add_library(version STATIC IMPORTED)
+set_target_properties(version PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/src/libversion.a)
+    
+add_library(randomx STATIC IMPORTED)
+set_target_properties(randomx PROPERTIES IMPORTED_LOCATION
+    ${MOLAIIN_BUILD_DIR}/external/randomx/librandomx.a)   
+    
+
+set(moLAIIN_include_dirs ${MOLAIIN_ROOT_DIR}/contrib/epee/include
+    ${MOLAIIN_ROOT_DIR}/external/
+    ${MOLAIIN_ROOT_DIR}/external/easylogging++
+    ${MOLAIIN_ROOT_DIR}/external/rapidjson/include
+    ${MOLAIIN_SRC_DIR}/
+    ${MOLAIIN_SRC_DIR}/wallet
+    ${MOLAIIN_SRC_DIR}/wallet/api
+    ${MOLAIIN_SRC_DIR}/hardforks
+    ${MOLAIIN_SRC_DIR}/crypto
+    ${MOLAIIN_SRC_DIR}/crypto/crypto_ops_builder/include/
+    ${Protobuf_INCLUDE_DIR}
+    ${Boost_INCLUDE_DIR}
+    ${OPENSSL_INCLUDE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/moLAIIN-cpp/external/libsodium/include/sodium
+    #[[${CMAKE_CURRENT_SOURCE_DIR}/external/moLAIIN-cpp/external/openssl-sdk/include]]
+    ${HIDAPI_INCLUDE_DIR}
+    ${UNBOUND_INCLUDE_DIR}
+)
+set(moLAIIN_src wallet rpc_base net lmdb unbound easylogging cryptonote_core cryptonote_protocol cryptonote_basic cryptonote_format_utils_basic mnemonics ringct ringct_basic common blockchain_db blocks checkpoints device device_trezor cncrypto multisig version randomx epee hardforks ${wallet_crypto} 
+${UNBOUND_LIBRARIES} ${Boost_LIBRARIES} ${Protobuf_LIBRARY} ${LibUSB_LIBRARIES} ${OPENSSL_LIBRARIES} ${SODIUM_LIBRARY} ${HIDAPI_LIBRARY} ${EXTRA_LIBRARIES})
+
+
+# moLAIIN-cpp (wrapper)
+set(moLAIIN_cpp_include_dir ${CMAKE_CURRENT_SOURCE_DIR}/external/moLAIIN-cpp/src/)
+set(moLAIIN_cpp_src ${CMAKE_CURRENT_SOURCE_DIR}/build/libmoLAIIN-cpp.a)
+
+
+# sqlite3
+set(sqlite_include_dir ${CMAKE_CURRENT_SOURCE_DIR}/external/sqlite) # v3.39.1 (amalgamation - said to run a bit faster)
+set(sqlite_src ${CMAKE_CURRENT_SOURCE_DIR}/build/libsqlite3.a)
+
+
+# QR-Code-generator
+set(qrcodegen_include_dir ${CMAKE_CURRENT_SOURCE_DIR}/external/QR-Code-generator/cpp) # v1.8.0
+set(qrcodegen_src ${CMAKE_CURRENT_SOURCE_DIR}/build/libqrcodegen.a)
+
+
+# json
+set(json_include_dir ${CMAKE_CURRENT_SOURCE_DIR}/external/json/single_include)
+
+
+# curl
+find_package(CURL)
+if(CURL_FOUND) 
+    message(STATUS "Using CURL: ${CURL_LIBRARIES} (v${CURL_VERSION_STRING})")
+    set(curl_include_dirs ${CURL_INCLUDE_DIRS})
+    set(curl_src ${CURL_LIBRARIES})
+endif()
+if(NOT CURL_FOUND)
+    set(curl_include_dirs ${CMAKE_CURRENT_SOURCE_DIR}/external/curl/include ${CMAKE_CURRENT_SOURCE_DIR}/external/curl/lib)
+    set(curl_src ${CMAKE_CURRENT_SOURCE_DIR}/external/curl/lib/.libs/libcurl.a) # In case user chooses to build libcurl themselves instead of installing it on the system
+    add_definitions(-DCURL_STATICLIB)
+    set(CMAKE_CXX_LINK_EXECUTABLE "${CMAKE_CXX_LINK_EXECUTABLE} -lldap -llber -lnghttp2 -lpsl -lidn2 -lbrotlidec -lzstd -lrtmp") # for Arch (Manjaro)
+endif()
+
+
+# stduuid
+set(stduuid_include_dirs ${CMAKE_CURRENT_SOURCE_DIR}/external/stduuid ${CMAKE_CURRENT_SOURCE_DIR}/external/stduuid/catch ${CMAKE_CURRENT_SOURCE_DIR}/external/stduuid/include)
+
+
+# linenoise
+set(linenoise_include_dir ${CMAKE_CURRENT_SOURCE_DIR}/external/linenoise/)
+set(linenoise_src ${CMAKE_CURRENT_SOURCE_DIR}/build/liblinenoise.a)
+
+
+# lua
+set(lua_include_dir ${CMAKE_CURRENT_SOURCE_DIR}/external/lua/src/) # v5.4.4
+set(lua_src ${CMAKE_CURRENT_SOURCE_DIR}/build/liblua.a)
+
+
+# cxxopts
+set(cxxopts_include_dir ${CMAKE_CURRENT_SOURCE_DIR}/external/cxxopts/include/)
+
+
+# zlib
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build/libz.a")
+    set(zlib_include_dir ${CMAKE_CURRENT_SOURCE_DIR}/external/zlib/)
+    set(zlib_src ${CMAKE_CURRENT_SOURCE_DIR}/build/libz.a)
+    message(STATUS "Using ZLIB: ${zlib_src}")
+else()
+find_package(ZLIB)
+if(ZLIB_FOUND)
+    message(STATUS "Using ZLIB: ${ZLIB_LIBRARIES}")
+    set(zlib_include_dir ${ZLIB_INCLUDE_DIRS})
+    set(zlib_src ${ZLIB_LIBRARIES})
+endif()
+endif()
+
+
+# libi2pd (and i2pd_client)
+set(i2pd_include_dirs ${CMAKE_CURRENT_SOURCE_DIR}/external/i2pd/daemon ${CMAKE_CURRENT_SOURCE_DIR}/external/i2pd/i18n ${CMAKE_CURRENT_SOURCE_DIR}/external/i2pd/libi2pd ${CMAKE_CURRENT_SOURCE_DIR}/external/i2pd/libi2pd_client)
+set(i2pd_src ${CMAKE_CURRENT_SOURCE_DIR}/build/libi2pdclient.a ${CMAKE_CURRENT_SOURCE_DIR}/build/libi2pd.a ${CMAKE_CURRENT_SOURCE_DIR}/build/libi2pdlang.a)
+set(i2pd_daemon_src ${CMAKE_CURRENT_SOURCE_DIR}/build/libi2pddaemon.a)
+
+
+# i2psam
+set(i2psam_include_dir ${CMAKE_CURRENT_SOURCE_DIR}/external/i2psam/)
+set(i2psam_src ${CMAKE_CURRENT_SOURCE_DIR}/build/libi2psam.a)
+
+
+# LAIINshop link directories
+link_directories(${CMAKE_CURRENT_SOURCE_DIR}/build) # target_link_directories only available in CMake version 3.13 :(
+
+
+# LAIINshop core source files
+set(LAIINshop_crypto_src 
+    ${LAIINSHOP_CORE_SRC_DIR}/crypto/rsa.cpp
+    ${LAIINSHOP_CORE_SRC_DIR}/crypto/sha256.cpp
+    ${LAIINSHOP_CORE_SRC_DIR}/crypto/sha3.cpp
+)
+
+set(LAIINshop_database_src 
+    ${LAIINSHOP_CORE_SRC_DIR}/database/database.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/database/sqlite3/sqlite3.cpp
+)
+
+set(LAIINshop_network_src 
+    ${LAIINSHOP_CORE_SRC_DIR}/network/i2p.cpp 
+)
+
+set(LAIINshop_price_src 
+    ${LAIINSHOP_CORE_SRC_DIR}/price/coincodex/coincodex.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/price/coingecko/coingecko.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/price/coinmarketcap/coinmarketcap.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/price/cointelegraph/cointelegraph.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/price/cryptorank/cryptorank.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/price/cryptowatch/cryptowatch.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/price/fawazahmed0/fawazahmed0.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/price/kraken/kraken.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/price/currency_converter.cpp
+)
+
+set(LAIINshop_protocol_src 
+    ${LAIINSHOP_CORE_SRC_DIR}/protocol/messages/msgpack.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/protocol/p2p/file_piece_hasher.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/protocol/p2p/key_mapper.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/protocol/p2p/node.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/protocol/p2p/routing_table.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/protocol/p2p/serializer.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/protocol/rpc/json_rpc.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/protocol/transport/client.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/protocol/transport/ip_address.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/protocol/transport/server.cpp
+)
+
+set(LAIINshop_tools_src 
+    ${LAIINSHOP_CORE_SRC_DIR}/tools/base64.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/tools/logger.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/tools/process.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/tools/script.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/tools/timestamp.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/tools/updater.cpp
+)
+
+set(LAIINshop_wallet_src 
+    ${LAIINSHOP_CORE_SRC_DIR}/wallet/wallet.cpp 
+    #[[${LAIINSHOP_CORE_SRC_DIR}/wallet/moLAIIN/moLAIIN.cpp]]
+)
+
+set(LAIINshop_core_src 
+    ${LAIINshop_crypto_src} 
+    ${LAIINshop_database_src} 
+    ${LAIINshop_network_src}
+    ${LAIINshop_price_src}
+    ${LAIINshop_protocol_src}
+    ${LAIINshop_tools_src}
+    ${LAIINshop_wallet_src}
+    ${LAIINSHOP_CORE_SRC_DIR}/cart.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/escrow.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/listing.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/order.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/product.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/seller.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/settings.cpp 
+    ${LAIINSHOP_CORE_SRC_DIR}/user.cpp 
+)
+
+set(LAIINshop_client_src ${LAIINshop_crypto_src} ${LAIINshop_database_src} ${LAIINshop_network_src} ${LAIINshop_price_src} ${LAIINSHOP_CORE_SRC_DIR}/protocol/p2p/file_piece_hasher.cpp ${LAIINSHOP_CORE_SRC_DIR}/protocol/p2p/serializer.cpp ${LAIINSHOP_CORE_SRC_DIR}/protocol/rpc/json_rpc.cpp ${LAIINSHOP_CORE_SRC_DIR}/protocol/transport/client.cpp ${LAIINshop_tools_src} ${LAIINshop_wallet_src} ${LAIINSHOP_CORE_SRC_DIR}/cart.cpp ${LAIINSHOP_CORE_SRC_DIR}/escrow.cpp ${LAIINSHOP_CORE_SRC_DIR}/listing.cpp ${LAIINSHOP_CORE_SRC_DIR}/order.cpp ${LAIINSHOP_CORE_SRC_DIR}/product.cpp ${LAIINSHOP_CORE_SRC_DIR}/seller.cpp ${LAIINSHOP_CORE_SRC_DIR}/settings.cpp ${LAIINSHOP_CORE_SRC_DIR}/user.cpp)
+
+
+# LAIINshop tests
+if(LAIINSHOP_BUILD_TESTS) # -DLAIINSHOP_BUILD_TESTS=1
+    enable_testing()
+    message(STATUS "${BoldMagenta}LAIINSHOP_BUILD_TESTS option set to ON${ColourReset}")
+    add_subdirectory(tests)
+endif()
+
+
+# LAIINmon
+set(LAIINshop_daemon "LAIINmon")
+set(LAIINshop_daemon_src ${LAIINshop_crypto_src} ${LAIINshop_database_src} ${LAIINshop_network_src} ${LAIINSHOP_CORE_SRC_DIR}/protocol/messages/msgpack.cpp ${LAIINSHOP_CORE_SRC_DIR}/protocol/p2p/file_piece_hasher.cpp ${LAIINSHOP_CORE_SRC_DIR}/protocol/p2p/key_mapper.cpp ${LAIINSHOP_CORE_SRC_DIR}/protocol/p2p/node.cpp ${LAIINSHOP_CORE_SRC_DIR}/protocol/p2p/routing_table.cpp ${LAIINSHOP_CORE_SRC_DIR}/protocol/rpc/json_rpc.cpp ${LAIINSHOP_CORE_SRC_DIR}/protocol/transport/client.cpp ${LAIINSHOP_CORE_SRC_DIR}/protocol/transport/ip_address.cpp ${LAIINSHOP_CORE_SRC_DIR}/protocol/transport/server.cpp ${LAIINSHOP_CORE_SRC_DIR}/tools/base64.cpp ${LAIINSHOP_CORE_SRC_DIR}/tools/logger.cpp ${LAIINSHOP_CORE_SRC_DIR}/tools/timestamp.cpp)
+add_executable(${LAIINshop_daemon} src/daemon/main.cpp ${LAIINshop_daemon_src})
+install(TARGETS ${LAIINshop_daemon} DESTINATION bin)
+target_compile_definitions(${LAIINshop_daemon} PRIVATE LAIINSHOP_DEBUG)
+target_include_directories(${LAIINshop_daemon} PRIVATE #[[${CMAKE_CURRENT_SOURCE_DIR}/src/]] ${moLAIIN_include_dirs} ${moLAIIN_cpp_include_dir} ${sqlite_include_dir} ${json_include_dir} ${zlib_include_dir} ${i2pd_include_dirs} ${cxxopts_include_dir})
+target_link_libraries(${LAIINshop_daemon} ${i2pd_src} ${i2pd_daemon_src} ${moLAIIN_cpp_src} ${sqlite_src} ${moLAIIN_src} ${zlib_src})#set(CMAKE_CXX_LINK_EXECUTABLE "${CMAKE_CXX_LINK_EXECUTABLE} -ldl") # fixes undefined reference to symbol 'dlsym@@GLIBC_2.2.5' error
+
+
+# LAIINshop-console
+if(LAIINSHOP_BUILD_CLI)
+    set(LAIINshop_cli "LAIINshop-console")
+    add_executable(${LAIINshop_cli} src/console/main.cpp ${LAIINshop_client_src})
+    install(TARGETS ${LAIINshop_cli} DESTINATION bin)
+    target_compile_definitions(${LAIINshop_cli} PRIVATE LAIINSHOP_DEBUG)
+    target_include_directories(${LAIINshop_cli} PRIVATE #[[${CMAKE_CURRENT_SOURCE_DIR}/src/]] ${moLAIIN_include_dirs} ${moLAIIN_cpp_include_dir} ${sqlite_include_dir} ${json_include_dir} ${zlib_include_dir} ${i2pd_include_dirs} ${lua_include_dir} ${curl_include_dirs} ${stduuid_include_dirs} ${linenoise_include_dir})
+    target_link_libraries(${LAIINshop_cli} ${i2pd_src} ${moLAIIN_cpp_src} ${sqlite_src} #[[${qrcodegen_src}]] ${curl_src} ${moLAIIN_src} ${zlib_src} ${lua_src} ${linenoise_src})
+    message(STATUS "${BoldMagenta}LAIINSHOP_BUILD_CLI option set to ON${ColourReset}")
+    target_compile_definitions(${LAIINshop_cli} PRIVATE LAIINSHOP_BUILD_CLI)
+endif()
+
+
+# LAIINshop
+if(LAIINSHOP_BUILD_GUI)
+    set(LAIINshop_gui "LAIINshop")
+    add_executable(${LAIINshop_gui})
+    install(TARGETS ${LAIINshop_gui} DESTINATION bin)
+    target_sources(${LAIINshop_gui} PRIVATE ${LAIINshop_res} src/gui/main.cpp src/gui/script_manager.cpp src/gui/wallet_controller.cpp src/gui/user_controller.cpp src/gui/image_loader.cpp src/gui/image_provider.cpp src/gui/wallet_qr_provider.cpp src/gui/currency_rate_provider.cpp #[[src/gui/table_model.cpp]] src/gui/daemon_manager.cpp src/gui/enum_wrapper.cpp src/gui/proxy_manager.cpp src/gui/backend.cpp ${LAIINshop_client_src})
+    target_compile_definitions(${LAIINshop_gui} PRIVATE LAIINSHOP_DEBUG)
+    target_include_directories(${LAIINshop_gui} PRIVATE #[[${CMAKE_CURRENT_SOURCE_DIR}/src/]] ${moLAIIN_include_dirs} ${moLAIIN_cpp_include_dir} ${sqlite_include_dir} ${json_include_dir} ${zlib_include_dir} ${i2pd_include_dirs} ${lua_include_dir} ${qrcodegen_include_dir})
+    target_link_libraries(${LAIINshop_gui} ${i2pd_src} ${moLAIIN_cpp_src} ${sqlite_src} ${qrcodegen_src} ${moLAIIN_src} ${zlib_src} ${lua_src})
+    message(STATUS "${BoldMagenta}LAIINSHOP_BUILD_GUI option set to ON${ColourReset}")
+    target_compile_definitions(${LAIINshop_gui} PRIVATE LAIINSHOP_BUILD_GUI)
+endif()
+
+
+add_subdirectory(assets)
+
+
+# gRPC
+if(LAIINSHOP_USE_GRPC)
+    message(STATUS "Using gRPC")
+    target_compile_definitions(${LAIINshop_gui} PRIVATE LAIINSHOP_USE_GRPC)
+    target_compile_definitions(${LAIINshop_cli} PRIVATE LAIINSHOP_USE_GRPC)
+    target_compile_definitions(${LAIINshop_daemon} PRIVATE LAIINSHOP_USE_GRPC)
+    if(LAIINSHOP_USE_SYSTEM_GRPC)
+        # Find system-installed gRPC
+        find_package(gRPC CONFIG REQUIRED)
+        message(STATUS "USE_SYSTEM_GRPC option set to ON")
+        target_link_libraries(${LAIINshop_gui} gRPC::grpc++)
+        target_link_libraries(${LAIINshop_cli} gRPC::grpc++)
+        target_link_libraries(${LAIINshop_daemon} gRPC::grpc++)
+    else()
+        # Build gRPC using FetchContent or add_subdirectory
+    endif()
+endif()
+
+# system sockets
+if(NOT LAIINSHOP_USE_LIBZMQ AND NOT LAIINSHOP_USE_LIBUV)
+    message(STATUS "${BoldWhite}Using SYSTEM SOCKETS${ColourReset}")
+    if(LAIINSHOP_BUILD_GUI)
+        target_compile_definitions(${LAIINshop_gui} PRIVATE LAIINSHOP_USE_SYSTEM_SOCKETS)
+    endif()
+    if(LAIINSHOP_BUILD_CLI)
+        target_compile_definitions(${LAIINshop_cli} PRIVATE LAIINSHOP_USE_SYSTEM_SOCKETS)
+    endif()
+    target_compile_definitions(${LAIINshop_daemon} PRIVATE LAIINSHOP_USE_SYSTEM_SOCKETS)
+endif()
+
+
+# libzmq
+find_package(ZeroMQ)
+if(ZeroMQ_FOUND)
+    if(LAIINSHOP_USE_LIBZMQ)
+        message(STATUS "${BoldRed}Using LIBZMQ: ${ZeroMQ_LIBRARY} (v${ZeroMQ_VERSION})${ColourReset}")
+        if(LAIINSHOP_BUILD_GUI)
+            target_compile_definitions(${LAIINshop_gui} PRIVATE LAIINSHOP_USE_LIBZMQ)
+            target_link_libraries(${LAIINshop_gui} ${ZeroMQ_LIBRARIES})
+        endif()
+        if(LAIINSHOP_BUILD_CLI)
+            target_compile_definitions(${LAIINshop_cli} PRIVATE LAIINSHOP_USE_LIBZMQ)
+            target_link_libraries(${LAIINshop_cli} ${ZeroMQ_LIBRARIES})
+        endif()
+        target_compile_definitions(${LAIINshop_daemon} PRIVATE LAIINSHOP_USE_LIBZMQ)
+        target_link_libraries(${LAIINshop_daemon} ${ZeroMQ_LIBRARIES})
+    endif()
+endif()
+
+
+if (UUID_TIME_GENERATOR) # -DUUID_TIME_GENERATOR=1
+    if(LAIINSHOP_BUILD_CLI)
+        target_compile_definitions(${LAIINshop_cli} PRIVATE UUID_TIME_GENERATOR)
+    endif()    
+endif()
+
+
+if(WIN32)
+    set(winsock2_src ws2_32.lib) # -lglfw3 -lgdi32 -lopengl32 -limm32
+    if(LAIINSHOP_BUILD_GUI)
+        target_link_libraries(${LAIINshop_gui} ${winsock2_src})
+    endif()
+    if(LAIINSHOP_BUILD_CLI)
+        target_link_libraries(${LAIINshop_cli} ${winsock2_src})
+    endif()    
+    target_link_libraries(${LAIINshop_daemon} ${winsock2_src})
+endif()
+
+
+if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+    find_package(LibUUID) # optional
+    if(UUID_SYSTEM_GENERATOR) # -DUUID_SYSTEM_GENERATOR=1
+        message(STATUS "UUID_SYSTEM_GENERATOR option set to ON")
+        if (LIBUUID_FOUND)
+            message(STATUS "Using LibUUID: ${LibUUID_LIBRARY}")
+            if(LAIINSHOP_BUILD_CLI)
+                target_compile_definitions(${LAIINshop_cli} PRIVATE UUID_SYSTEM_GENERATOR) # uuids::uuid_system_generator
+                target_link_libraries(${LAIINshop_cli} ${LibUUID_LIBRARY})        
+            endif()
+        endif()
+    endif()
+
+    set(posix_src libpthread.so libdl.so libm.so)
+    if(LAIINSHOP_BUILD_GUI)
+        target_link_libraries(${LAIINshop_gui} ${posix_src})
+    endif()
+    if(LAIINSHOP_BUILD_CLI)
+        target_link_libraries(${LAIINshop_cli} ${posix_src})
+    endif()
+    target_link_libraries(${LAIINshop_daemon} ${posix_src})
+endif()
+
+
+if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    find_library(CFLIB CoreFoundation) # optional
+    if(UUID_SYSTEM_GENERATOR) # -DUUID_SYSTEM_GENERATOR=1
+        message(STATUS "UUID_SYSTEM_GENERATOR option set to ON")
+        message(STATUS "Using CFLIB: ${CFLIB}")
+        if(LAIINSHOP_BUILD_CLI)
+            target_compile_definitions(${LAIINshop_cli} PRIVATE UUID_SYSTEM_GENERATOR) # uuids::uuid_system_generator
+            target_link_libraries(${LAIINshop_cli} ${CFLIB})
+        endif()
+    endif()
+endif()
+
+
+# qt5
+if(Qt5_FOUND)
+    if(LAIINSHOP_BUILD_GUI AND LAIINSHOP_USE_QT)
+        # Some Linux distros require Qt::Widgets due to the lack of a native platform file dialog implementation
+        if(LAIINSHOP_USE_QT_WIDGETS OR ${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+            message(STATUS "Using Qt5::Widgets")
+            target_compile_definitions(${LAIINshop_gui} PRIVATE LAIINSHOP_USE_QT_WIDGETS)
+            find_package(Qt5 COMPONENTS Widgets)
+            target_link_libraries(${LAIINshop_gui} Qt5::Widgets)
+        endif()
+    
+        message(STATUS "Using Qt5::Qml Qt5::Quick Qt5::Gui Qt5::Concurrent")
+        target_compile_definitions(${LAIINshop_gui} PRIVATE LAIINSHOP_USE_QT)
+        target_link_libraries(${LAIINshop_gui} Qt5::Qml Qt5::Quick Qt5::Gui Qt5::Concurrent #[[Qt5::QuickControls2]])
+    endif()
+endif()
+
+
