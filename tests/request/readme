@@ -1,0 +1,6 @@
+Be sure that the laiin daemon (neromon) is running in order for this to work.
+
+
+Run `./request.sh` to make a request to the laiin server via command line
+
+or compile request.cpp with `g++ request.cpp -o request -lcurl` then run `./request`
