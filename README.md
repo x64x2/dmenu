@@ -1,5 +1,7 @@
 # laiin - WORK IN PROGRESS (ON HOLD)
 
+![Uploading 0000000000000000.png…]()
+
 
 laiin is a decentralized peer-to-peer marketplace for trading goods and services with [**Monero**](https://getmonero.org/)
 
