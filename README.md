@@ -27,7 +27,7 @@ laiin is a decentralized peer-to-peer marketplace for trading goods and services
 
 # Background
 
-Laiin is an implementation that leverages what I learned in the Ethereum Hook Incubator. My goal was to create smart contract interactions where I could minimize the technical complexity for the end-user. I used variations of signed messages, hashes, proofs to streamline how people can trade without compromising their privacy.
+Laiin is an implementation that leverages what I learned in cppcon . My goal was to create p2p sort of ebay where I could minimize the technical complexity for the end-user. I used variations of signed messages, hashes, proofs to streamline how people can trade without compromising their privacy.
 
 ## Building laiin
 
